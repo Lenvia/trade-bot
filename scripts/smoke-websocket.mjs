@@ -1,5 +1,6 @@
 const endpoint = "wss://gocharting.com/sdk/ws";
 const symbol = "BYBIT:FUTURE:BTCUSDT";
+const interval = "15m";
 const result = {
   welcome: false,
   history: false,
@@ -24,7 +25,7 @@ socket.addEventListener("open", () => {
     command: "timeseries",
     payload: {
       symbol,
-      interval: "5m",
+      interval,
       session: "RTH",
       hint: "rows=20",
       echo: "codex-smoke-test",
@@ -76,7 +77,7 @@ function checkComplete() {
 
 function finish(success, message) {
   clearTimeout(timeout);
-  console.log(JSON.stringify({ endpoint, symbol, ...result, message }, null, 2));
+  console.log(JSON.stringify({ endpoint, symbol, interval, ...result, message }, null, 2));
   if (socket.readyState < WebSocket.CLOSING) socket.close(1000, "Smoke test complete");
   process.exitCode = success ? 0 : 1;
   setTimeout(() => process.exit(process.exitCode), 50);

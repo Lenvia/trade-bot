@@ -581,3 +581,4 @@ function escapeHtml(value) {
 }
 
 scheduleRender();
+connect();
