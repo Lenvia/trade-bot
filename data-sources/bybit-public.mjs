@@ -4,33 +4,49 @@ import {
   normalizeMarketSelection,
 } from "../market-data-contract.mjs";
 
-export const GOCHARTING_DEMO_URL = "wss://gocharting.com/sdk/ws";
-export const GOCHARTING_DEMO_SYMBOLS = Object.freeze([
-  "BYBIT:FUTURE:BTCUSDT",
-  "BYBIT:FUTURE:ETHUSDT",
-]);
+export const BYBIT_REST_URL = "https://api.bybit.com/v5/market/kline";
+export const BYBIT_LINEAR_WS_URL = "wss://stream.bybit.com/v5/public/linear";
 
+const INTERVALS = Object.freeze({
+  "1m": "1",
+  "5m": "5",
+  "15m": "15",
+  "1h": "60",
+  "1D": "D",
+});
 const PING_INTERVAL_MS = 20_000;
 const PONG_TIMEOUT_MS = 45_000;
 const HISTORY_TIMEOUT_MS = 15_000;
 const RECONNECT_MAX_DELAY_MS = 30_000;
 const NOOP = () => {};
 
-export class GoChartingDemoSource {
+export class BybitPublicSource {
   constructor({
     WebSocketImpl = globalThis.WebSocket,
+    fetchImpl = globalThis.fetch,
+    AbortControllerImpl = globalThis.AbortController,
     scheduler = globalThis,
     now = () => Date.now(),
-    url = GOCHARTING_DEMO_URL,
+    restUrl = BYBIT_REST_URL,
+    wsUrl = BYBIT_LINEAR_WS_URL,
     callbacks = {},
   } = {}) {
     if (typeof WebSocketImpl !== "function") {
       throw new TypeError("WebSocketImpl must be a constructor");
     }
+    if (typeof fetchImpl !== "function") throw new TypeError("fetchImpl must be a function");
+    if (typeof AbortControllerImpl !== "function") {
+      throw new TypeError("AbortControllerImpl must be a constructor");
+    }
     this.WebSocketImpl = WebSocketImpl;
+    // Browser fetch requires the Window receiver in some runtimes. Wrapping it
+    // also keeps transport injection separate from provider protocol code.
+    this.fetchImpl = (...args) => fetchImpl(...args);
+    this.AbortControllerImpl = AbortControllerImpl;
     this.scheduler = scheduler;
     this.now = now;
-    this.url = url;
+    this.restUrl = restUrl;
+    this.wsUrl = wsUrl;
     this.callbacks = {
       onConnectionState: callbacks.onConnectionState ?? NOOP,
       onHistoryStart: callbacks.onHistoryStart ?? NOOP,
@@ -48,7 +64,7 @@ export class GoChartingDemoSource {
     this.reconnectAttempt = 0;
     this.reconnectTimer = null;
     this.pingTimer = null;
-    this.lastPongAt = null;
+    this.lastMessageAt = null;
   }
 
   get isOpen() {
@@ -78,14 +94,15 @@ export class GoChartingDemoSource {
   }
 
   updateSelection(selection) {
-    const previous = this.selection;
+    const previousSymbol = this.selection ? bybitSymbol(this.selection.symbol) : null;
     this.selection = normalizeSelection(selection);
     if (!this.isOpen) return;
 
-    if (previous?.symbol !== this.selection.symbol) {
-      if (this.subscribedSymbol) this.sendSubscription("UNSUBSCRIBE", this.subscribedSymbol);
-      this.sendSubscription("SUBSCRIBE", this.selection.symbol);
-      this.subscribedSymbol = this.selection.symbol;
+    const nextSymbol = bybitSymbol(this.selection.symbol);
+    if (previousSymbol !== nextSymbol) {
+      if (this.subscribedSymbol) this.sendSubscription("unsubscribe", this.subscribedSymbol);
+      this.sendSubscription("subscribe", nextSymbol);
+      this.subscribedSymbol = nextSymbol;
     }
     this.requestHistory();
   }
@@ -101,7 +118,7 @@ export class GoChartingDemoSource {
       requestId: ++this.requestSequence,
       background,
       selection: { ...this.selection },
-      buffer: [],
+      controller: new this.AbortControllerImpl(),
       timeout: null,
       startedAt: this.now(),
     };
@@ -113,33 +130,45 @@ export class GoChartingDemoSource {
 
     const publicRequest = publicHistoryRequest(request);
     this.callbacks.onHistoryStart(publicRequest);
-    this.socket.send(JSON.stringify({
-      request_id: request.requestId,
-      command: "timeseries",
-      payload: {
-        symbol: request.selection.symbol,
-        interval: request.selection.interval,
-        session: "RTH",
-        hint: `rows=${background ? 20 : request.selection.rows}`,
-        echo: `trade-bot:${request.requestId}`,
-      },
-    }));
     this.callbacks.onLog(
       `${background ? "Background history reconcile" : "History request"}: `
       + `${request.selection.symbol} ${request.selection.interval} rows=${background ? 20 : request.selection.rows}`,
     );
+    void this.loadHistory(request);
     return publicRequest;
+  }
+
+  async loadHistory(request) {
+    const url = historyUrl(this.restUrl, request.selection, request.background ? 20 : request.selection.rows);
+    try {
+      const response = await this.fetchImpl(url, { signal: request.controller.signal });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const payload = await response.json();
+      if (payload.retCode !== 0) throw new Error(payload.retMsg || `Bybit error ${payload.retCode}`);
+      if (this.historyRequest !== request) return;
+
+      const bars = (payload.result?.list ?? [])
+        .map(normalizeBybitBar)
+        .filter(Boolean)
+        .sort((left, right) => left.time - right.time);
+      this.clearHistoryTimeout(request);
+      this.historyRequest = null;
+      this.callbacks.onHistory({ request: publicHistoryRequest(request), bars, receivedAt: this.now() });
+    } catch (error) {
+      if (this.historyRequest !== request) return;
+      this.failHistoryRequest(request, error?.message || "Unknown history error", "provider");
+    }
   }
 
   openConnection() {
     const connecting = this.WebSocketImpl.CONNECTING ?? 0;
     if (this.socket && this.socket.readyState <= connecting) return;
-    this.callbacks.onConnectionState({ kind: "connecting", message: "正在连接…", canRefresh: false });
-    this.callbacks.onLog(`Connecting to ${this.url}`);
+    this.callbacks.onConnectionState({ kind: "connecting", message: "正在连接 Bybit…", canRefresh: false });
+    this.callbacks.onLog(`Connecting to ${this.wsUrl}`);
 
     let socket;
     try {
-      socket = new this.WebSocketImpl(this.url);
+      socket = new this.WebSocketImpl(this.wsUrl);
     } catch (error) {
       this.callbacks.onConnectionState({ kind: "error", message: "连接创建失败", canRefresh: false });
       this.callbacks.onLog(`WebSocket constructor failed: ${error.message}`);
@@ -150,13 +179,17 @@ export class GoChartingDemoSource {
 
     socket.addEventListener("open", () => {
       if (this.socket !== socket) return;
-      this.callbacks.onLog("WebSocket transport opened; waiting for welcome frame.");
-      this.lastPongAt = this.now();
-      socket.send("PING");
-      this.requestHistory();
-      this.sendSubscription("SUBSCRIBE", this.selection.symbol);
-      this.subscribedSymbol = this.selection.symbol;
+      this.lastMessageAt = this.now();
+      const symbol = bybitSymbol(this.selection.symbol);
+      this.sendSubscription("subscribe", symbol);
+      this.subscribedSymbol = symbol;
       this.startHeartbeat(socket);
+      this.callbacks.onConnectionState({
+        kind: "connected",
+        message: "已连接 Bybit Public",
+        canRefresh: true,
+      });
+      this.requestHistory();
     });
     socket.addEventListener("message", ({ data }) => {
       if (this.socket === socket) this.handleMessage(data);
@@ -164,7 +197,7 @@ export class GoChartingDemoSource {
     socket.addEventListener("error", () => {
       if (this.socket !== socket) return;
       this.callbacks.onConnectionState({ kind: "error", message: "连接错误", canRefresh: false });
-      this.callbacks.onLog("WebSocket error. Check network access and browser console.");
+      this.callbacks.onLog("Bybit WebSocket error. Check proxy and browser console.");
     });
     socket.addEventListener("close", ({ code, reason }) => {
       if (this.socket !== socket) return;
@@ -215,41 +248,26 @@ export class GoChartingDemoSource {
 
   startHeartbeat(socket) {
     this.clearHeartbeat();
-    this.lastPongAt = this.now();
+    this.lastMessageAt = this.now();
     this.pingTimer = this.scheduler.setInterval(() => {
       if (this.socket !== socket || !this.isOpen) return;
-      if (this.now() - this.lastPongAt > PONG_TIMEOUT_MS) {
+      if (this.now() - this.lastMessageAt > PONG_TIMEOUT_MS) {
         this.callbacks.onLog("Heartbeat timed out; reconnecting.");
         socket.close(4000, "Heartbeat timeout");
         return;
       }
-      socket.send("PING");
+      socket.send(JSON.stringify({ req_id: `ping-${this.now()}`, op: "ping" }));
     }, PING_INTERVAL_MS);
   }
 
   clearHeartbeat() {
     if (this.pingTimer !== null) this.scheduler.clearInterval(this.pingTimer);
     this.pingTimer = null;
-    this.lastPongAt = null;
+    this.lastMessageAt = null;
   }
 
   handleMessage(data) {
     if (typeof data !== "string") return;
-    if (data.startsWith("Welcome-")) {
-      this.reconnectAttempt = 0;
-      this.callbacks.onConnectionState({
-        kind: "connected",
-        message: "已连接 GoCharting Demo",
-        canRefresh: true,
-      });
-      this.callbacks.onLog(data);
-      return;
-    }
-    if (data.startsWith("PONG")) {
-      this.lastPongAt = this.now();
-      return;
-    }
-
     let message;
     try {
       message = JSON.parse(data);
@@ -257,55 +275,29 @@ export class GoChartingDemoSource {
       this.callbacks.onLog(`Unparsed message: ${data.slice(0, 180)}`);
       return;
     }
+    this.lastMessageAt = this.now();
 
-    if (message.command === "ERROR") {
-      this.handleErrorMessage(message);
+    if (message.op === "subscribe") {
+      if (message.success === false) {
+        this.callbacks.onConnectionState({ kind: "error", message: "订阅失败", canRefresh: true });
+        this.callbacks.onLog(`Subscription failed: ${message.ret_msg || "Unknown error"}`);
+        return;
+      }
+      this.reconnectAttempt = 0;
+      this.callbacks.onLog(`Subscribed: ${this.subscribedSymbol}`);
       return;
     }
-    if (message.command === "timeseries") {
-      this.receiveHistoryChunk(message);
-      return;
-    }
-    if (message.command === "SUBSCRIBE") {
-      this.callbacks.onLog(`Subscribed: ${(message.payload ?? []).join(", ")}`);
-      return;
-    }
-    if (message.channel === "trade") {
-      const trades = normalizeTrades(message.payload, this.selection?.symbol);
-      if (trades.length > 0) this.callbacks.onTrades(trades);
-    }
-  }
+    if (message.op === "pong" || message.ret_msg === "pong") return;
 
-  handleErrorMessage(message) {
-    const detail = message.message ?? message.out?.message ?? "Unknown API error";
-    const request = this.historyRequest;
-    if (request && message.request_id === request.requestId) {
-      this.failHistoryRequest(request, detail, "provider");
-      return;
-    }
-    this.callbacks.onConnectionState({ kind: "error", message: "接口返回错误", canRefresh: this.isOpen });
-    this.callbacks.onLog(`ERROR: ${detail}`);
-  }
-
-  receiveHistoryChunk(message) {
-    const request = this.historyRequest;
-    if (!request || (message.request_id != null && message.request_id !== request.requestId)) return;
-    const criteria = message.payload?.criteria;
-    if (criteria?.symbol && criteria.symbol !== request.selection.symbol) return;
-    if (criteria?.interval && criteria.interval !== request.selection.interval) return;
-
-    request.buffer.push(...flattenBars(message.payload?.bars).map(normalizeBar).filter(Boolean));
-    if (![1, 2].includes(message.final)) return;
-
-    const unique = new Map(request.buffer.map((bar) => [bar.time, bar]));
-    const bars = [...unique.values()].sort((left, right) => left.time - right.time);
-    this.clearHistoryTimeout(request);
-    this.historyRequest = null;
-    this.callbacks.onHistory({ request: publicHistoryRequest(request), bars, receivedAt: this.now() });
+    const selectedSymbol = this.selection ? bybitSymbol(this.selection.symbol) : null;
+    if (message.topic !== `publicTrade.${selectedSymbol}`) return;
+    const trades = normalizeBybitTrades(message.data);
+    if (trades.length > 0) this.callbacks.onTrades(trades);
   }
 
   failHistoryRequest(request, message, reason) {
     if (this.historyRequest !== request) return;
+    request.controller.abort();
     this.clearHistoryTimeout(request);
     this.historyRequest = null;
     this.callbacks.onHistoryError({ request: publicHistoryRequest(request), message, reason });
@@ -317,50 +309,69 @@ export class GoChartingDemoSource {
     request.timeout = null;
   }
 
-  sendSubscription(command, symbol) {
+  sendSubscription(op, symbol) {
     if (!this.isOpen) return;
-    this.socket.send(JSON.stringify({ command, channel: "trade", payload: [symbol] }));
+    this.socket.send(JSON.stringify({ op, args: [`publicTrade.${symbol}`] }));
   }
 }
 
-export function flattenBars(rawBars) {
-  if (Array.isArray(rawBars)) return rawBars;
-  if (!rawBars || typeof rawBars !== "object") return [];
-  return Object.values(rawBars).flatMap((group) => (Array.isArray(group) ? group : []));
+export function bybitInterval(interval) {
+  const mapped = INTERVALS[interval];
+  if (!mapped) throw new RangeError(`Unsupported Bybit interval: ${interval}`);
+  return mapped;
 }
 
-export function normalizeBar(bar) {
-  if (!bar || typeof bar !== "object") return null;
-  const time = new Date(bar.date ?? bar.time ?? bar.timestamp).getTime();
+export function bybitSymbol(productId) {
+  const symbol = String(productId ?? "").split(":").at(-1)?.toUpperCase() ?? "";
+  if (!/^[A-Z0-9-]{2,40}$/.test(symbol)) {
+    throw new RangeError(`Unsupported Bybit symbol: ${productId}`);
+  }
+  return symbol;
+}
+
+export function normalizeBybitBar(bar) {
+  if (!Array.isArray(bar) || bar.length < 6) return null;
   return createCanonicalBar({
-    time,
-    open: Number(bar.open),
-    high: Number(bar.high),
-    low: Number(bar.low),
-    close: Number(bar.close),
-    volume: Number(bar.volume ?? 0),
+    time: Number(bar[0]),
+    open: Number(bar[1]),
+    high: Number(bar[2]),
+    low: Number(bar[3]),
+    close: Number(bar[4]),
+    volume: Number(bar[5]),
   });
 }
 
-export function normalizeTrades(payload, symbol) {
-  if (!symbol || !payload || typeof payload !== "object") return [];
-  const incoming = Array.isArray(payload[symbol]) ? payload[symbol] : [];
-  return incoming.map((trade) => {
+export function normalizeBybitTrades(trades) {
+  if (!Array.isArray(trades)) return [];
+  return trades.map((trade) => {
     return createCanonicalTrade({
-      id: trade.id ?? trade.trade_id ?? trade.tid ?? null,
-      time: Number(trade.t_ms),
-      price: Number(trade.ltp),
-      size: Number(trade.l_sz ?? 0),
-      side: String(trade.side ?? "Unknown"),
+      id: trade?.i ?? null,
+      time: Number(trade?.T),
+      price: Number(trade?.p),
+      size: Number(trade?.v ?? 0),
+      side: String(trade?.S ?? "Unknown"),
     });
   }).filter(Boolean);
 }
 
+function historyUrl(baseUrl, selection, rows) {
+  const url = new URL(baseUrl);
+  url.search = new URLSearchParams({
+    category: "linear",
+    symbol: bybitSymbol(selection.symbol),
+    interval: bybitInterval(selection.interval),
+    limit: String(Math.min(rows, 1000)),
+  });
+  return url.toString();
+}
+
 function normalizeSelection(selection) {
-  const normalized = normalizeMarketSelection(selection);
-  if (!GOCHARTING_DEMO_SYMBOLS.includes(normalized.symbol)) {
-    throw new RangeError(`Unsupported GoCharting demo symbol: ${normalized.symbol}`);
-  }
+  const normalized = normalizeMarketSelection(selection, {
+    supportedIntervals: Object.keys(INTERVALS),
+    maxRows: 1000,
+  });
+  bybitSymbol(normalized.symbol);
+  bybitInterval(normalized.interval);
   return normalized;
 }
 

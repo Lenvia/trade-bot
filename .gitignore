@@ -1,0 +1,18 @@
+# Dependencies and generated output
+node_modules/
+coverage/
+dist/
+
+# Local environment and secrets
+.env
+.env.*
+!.env.example
+
+# IDE and operating-system metadata
+.idea/
+.DS_Store
+*.swp
+
+# Runtime logs
+*.log
+npm-debug.log*

@@ -5,7 +5,8 @@ import {
   reconcileHistoryWithTrades,
   replayTradesOnBars,
 } from "/live-data.mjs";
-import { GoChartingDemoSource } from "/data-sources/gocharting-demo.mjs";
+import { BybitPublicSource } from "/data-sources/bybit-public.mjs";
+import { assertMarketDataSource } from "/market-data-contract.mjs";
 import {
   drawIndicatorChart,
   drawPriceChart,
@@ -77,7 +78,7 @@ const state = {
 };
 
 const tradeDeduper = createTradeDeduper();
-const dataSource = new GoChartingDemoSource({
+const dataSource = assertMarketDataSource(new BybitPublicSource({
   callbacks: {
     onConnectionState: handleConnectionState,
     onHistoryStart: beginHistoryLoad,
@@ -86,7 +87,7 @@ const dataSource = new GoChartingDemoSource({
     onTrades: receiveTrades,
     onLog: log,
   },
-});
+}));
 
 elements.connectButton.addEventListener("click", () => connect());
 elements.refreshButton.addEventListener("click", () => requestHistory());

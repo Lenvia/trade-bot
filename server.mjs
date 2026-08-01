@@ -4,7 +4,7 @@ import { extname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = fileURLToPath(new URL(".", import.meta.url));
-const port = Number.parseInt(process.env.GOCHARTING_DEMO_PORT ?? "8765", 10);
+const port = Number.parseInt(process.env.MARKET_DATA_DEMO_PORT ?? process.env.GOCHARTING_DEMO_PORT ?? "8765", 10);
 
 const contentTypes = {
   ".html": "text/html; charset=utf-8",
@@ -26,6 +26,8 @@ const publicFiles = new Set([
   "/chart-renderer.mjs",
   "/chart-view.mjs",
   "/live-data.mjs",
+  "/market-data-contract.mjs",
+  "/data-sources/bybit-public.mjs",
   "/data-sources/gocharting-demo.mjs",
 ]);
 
@@ -55,7 +57,7 @@ const server = createServer((request, response) => {
 });
 
 server.listen(port, "127.0.0.1", () => {
-  console.log(`GoCharting Codex Demo: http://127.0.0.1:${port}`);
+  console.log(`Market Data Codex Demo: http://127.0.0.1:${port}`);
   console.log("Press Ctrl+C to stop.");
 });
 

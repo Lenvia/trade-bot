@@ -32,7 +32,7 @@ test("GoCharting payloads are normalized behind the source boundary", () => {
 
   assert.deepEqual(normalizeTrades({
     [selection.symbol]: [{ trade_id: "abc", t_ms: 123, ltp: "101", l_sz: "0.5", side: "Buy" }],
-  }, selection.symbol), [{ id: "abc", time: 123, price: 101, size: 0.5, side: "Buy" }]);
+  }, selection.symbol), [{ id: "abc", time: 123, price: 101, size: 0.5, side: "buy" }]);
 });
 
 test("a matching history error releases the request so reconciliation can resume", () => {
