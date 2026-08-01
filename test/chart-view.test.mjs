@@ -33,6 +33,12 @@ test("zoom keeps the approximate pointer anchor in view", () => {
   assert.ok(window.start <= 439 && window.end >= 439);
 });
 
+test("toolbar-style zoom anchored at the right edge keeps the latest bar visible", () => {
+  const result = zoomWindow(500, 120, 0, 1, 0.78);
+  assert.equal(result.rightOffset, 0);
+  assert.equal(getVisibleWindow(500, result.visibleCount, result.rightOffset).end, 500);
+});
+
 test("desktop zoom stops before candle slots become sparse", () => {
   const minimum = minimumVisibleBarsForPlotWidth(1093);
   assert.equal(minimum, 85);

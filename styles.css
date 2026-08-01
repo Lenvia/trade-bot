@@ -229,6 +229,7 @@ th:first-child, td:first-child { text-align: left; }
 th { position: sticky; top: 0; color: var(--muted); background: var(--surface); }
 .buy { color: var(--green); }
 .sell { color: var(--red); }
+.neutral { color: var(--muted); }
 .placeholder-row { height: 280px; color: var(--muted); text-align: center !important; }
 
 .debug-panel { margin-top: 20px; padding: 18px 22px; }

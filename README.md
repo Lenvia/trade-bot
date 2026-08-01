@@ -32,7 +32,7 @@
 需要 Node.js 20 或更高版本。
 
 ```bash
-cd /Users/yy/Documents/Common/gocharting-codex-demo
+cd /Users/yy/Projects/trade-bot
 npm start
 ```
 
@@ -54,7 +54,8 @@ wss://gocharting.com/sdk/ws
 npm test
 ```
 
-测试覆盖 EMA、RSI、MACD、实时更新当前 K 柱、跨周期创建新柱和历史校准合并。
+测试覆盖 EMA、RSI、MACD、实时更新当前 K 柱、乱序 trade、请求期间 tick 合并、
+历史请求 error/timeout 和 WebSocket heartbeat recovery。
 
 如需直接验证 GoCharting WebSocket、历史 K 线和实时成交：
 
@@ -64,13 +65,13 @@ npm run smoke
 
 ## 数据如何流动
 
-1. 浏览器打开官方 WebSocket。
-2. 发送 `timeseries` 请求获取 OHLCV。
-3. 发送 `SUBSCRIBE` 订阅实时 trades。
-4. 页面将 OHLCV 标准化为统一对象。
-5. `indicators.mjs` 只用 Close 序列计算 RSI、MACD。
-6. 实时 trade 会更新当前周期的实验性 K 线，跨过周期边界后自动创建新柱。
-7. 每 5 分钟发起一次历史数据后台校准，不采用高频全量轮询。
+1. `data-sources/gocharting-demo.mjs` 打开官方 WebSocket，并把原始消息标准化。
+2. `live-data.mjs` 合并历史 OHLCV 与实时 trades，处理请求期间 tick 和乱序 Close。
+3. `indicator-set.mjs` 调用纯公式生成当前 Dashboard 的 RSI、MACD 派生数据。
+4. `app.mjs` 只协调页面状态，`chart-renderer.mjs` 消费标准数据绘制 Canvas。
+5. 每 5 分钟发起一次历史数据后台校准，不采用高频全量轮询。
+
+完整模块边界和未来扩展原则见 [`ARCHITECTURE.md`](./ARCHITECTURE.md)。
 
 ## 重要限制
 

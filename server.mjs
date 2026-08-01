@@ -21,8 +21,12 @@ const publicFiles = new Set([
   "/styles.css",
   "/app.mjs",
   "/indicators.mjs",
+  "/indicator-set.mjs",
+  "/formatters.mjs",
+  "/chart-renderer.mjs",
   "/chart-view.mjs",
   "/live-data.mjs",
+  "/data-sources/gocharting-demo.mjs",
 ]);
 
 const server = createServer((request, response) => {
