@@ -1,0 +1,14 @@
+{
+  "name": "gocharting-codex-demo",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node server.mjs",
+    "test": "node --test",
+    "smoke": "node scripts/smoke-websocket.mjs"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
