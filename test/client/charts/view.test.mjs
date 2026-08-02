@@ -6,7 +6,7 @@ import {
   minimumVisibleBarsForPlotWidth,
   panWindow,
   zoomWindow,
-} from "../chart-view.mjs";
+} from "../../../src/client/charts/view.mjs";
 
 test("visible window follows the newest bars by default", () => {
   assert.deepEqual(getVisibleWindow(500, 120, 0), {

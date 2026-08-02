@@ -1,14 +1,11 @@
-import { clamp } from "./chart-view.mjs";
-import { splitThresholdSegments } from "./indicators.mjs";
+import { clamp } from "./view.mjs";
 import {
   compactNumber,
   formatCrosshairTime,
-  formatIndicator,
   formatPrice,
-} from "./formatters.mjs";
+} from "../formatters.mjs";
 
 export const PRICE_PADDING = Object.freeze({ top: 24, right: 78, bottom: 34, left: 12 });
-export const INDICATOR_PADDING = Object.freeze({ left: 12, right: 78, top: 8, bottom: 22 });
 
 export function drawPriceChart({
   canvas,
@@ -104,118 +101,6 @@ export function drawPriceChart({
   context.fillText(lastLabel, width - padding.right - labelWidth, height - 8);
 }
 
-export function drawIndicatorChart({
-  canvas,
-  allBars,
-  indicators,
-  visibleWindow,
-  hover,
-  interval,
-}) {
-  const { context, width, height } = prepareCanvas(canvas);
-  context.clearRect(0, 0, width, height);
-  if (allBars.length === 0) return;
-
-  const bars = allBars.slice(visibleWindow.start, visibleWindow.end);
-  const rsiValues = indicators.rsi14.slice(visibleWindow.start, visibleWindow.end);
-  const line = indicators.macd12_26_9.line.slice(visibleWindow.start, visibleWindow.end);
-  const signal = indicators.macd12_26_9.signal.slice(visibleWindow.start, visibleWindow.end);
-  const histogram = indicators.macd12_26_9.histogram.slice(visibleWindow.start, visibleWindow.end);
-  const padding = INDICATOR_PADDING;
-  const plotWidth = width - padding.left - padding.right;
-  const slot = plotWidth / Math.max(1, bars.length);
-  const x = (index) => padding.left + slot * index + slot / 2;
-
-  const macdTop = padding.top + 17;
-  const macdBottom = Math.round(height * 0.43);
-  const rsiTop = macdBottom + 24;
-  const rsiBottom = height - padding.bottom;
-  const macdFinite = [...line, ...signal, ...histogram].filter(Number.isFinite);
-  const maxAbs = Math.max(...macdFinite.map(Math.abs), 1e-9);
-  const macdCenter = (macdTop + macdBottom) / 2;
-  const macdAmplitude = (macdBottom - macdTop) * 0.44;
-  const macdY = (value) => macdCenter - (value / maxAbs) * macdAmplitude;
-
-  context.fillStyle = "rgba(83,216,251,0.025)";
-  context.fillRect(padding.left, macdTop, plotWidth, macdBottom - macdTop);
-  context.strokeStyle = "rgba(141,153,166,0.22)";
-  context.beginPath();
-  context.moveTo(padding.left, macdCenter);
-  context.lineTo(width - padding.right, macdCenter);
-  context.stroke();
-
-  histogram.forEach((value, index) => {
-    if (!Number.isFinite(value)) return;
-    context.fillStyle = value >= 0 ? "rgba(98,230,167,0.5)" : "rgba(255,94,115,0.5)";
-    const zero = macdY(0);
-    const y = macdY(value);
-    context.fillRect(x(index) - 1.5, Math.min(zero, y), 3, Math.max(1, Math.abs(y - zero)));
-  });
-  drawSeries(context, line, x, macdY, "#53d8fb");
-  drawSeries(context, signal, x, macdY, "#ffcb6b");
-
-  const rsiY = (value) => rsiBottom - (value / 100) * (rsiBottom - rsiTop);
-  context.fillStyle = "rgba(255,94,115,0.07)";
-  context.fillRect(padding.left, rsiY(100), plotWidth, rsiY(70) - rsiY(100));
-  context.fillStyle = "rgba(83,216,251,0.025)";
-  context.fillRect(padding.left, rsiY(70), plotWidth, rsiY(30) - rsiY(70));
-  context.fillStyle = "rgba(83,216,251,0.065)";
-  context.fillRect(padding.left, rsiY(30), plotWidth, rsiY(0) - rsiY(30));
-
-  for (const level of [30, 50, 70]) {
-    context.strokeStyle = level === 70
-      ? "rgba(255,94,115,0.5)"
-      : level === 30
-        ? "rgba(83,216,251,0.5)"
-        : "rgba(141,153,166,0.2)";
-    context.setLineDash(level === 50 ? [3, 5] : []);
-    context.beginPath();
-    context.moveTo(padding.left, rsiY(level));
-    context.lineTo(width - padding.right, rsiY(level));
-    context.stroke();
-    context.fillStyle = level === 70 ? "#ff5e73" : level === 30 ? "#53d8fb" : "#8d99a6";
-    context.font = "10px ui-monospace, monospace";
-    const levelLabel = level === 70 ? "70 超买" : level === 30 ? "30 超卖" : "50 中线";
-    context.textAlign = "right";
-    context.fillText(levelLabel, width - padding.right - 7, rsiY(level) + 3);
-    context.textAlign = "left";
-  }
-  context.setLineDash([]);
-  drawThresholdSeries(context, rsiValues, x, rsiY);
-
-  const latestRsi = [...rsiValues].reverse().find(Number.isFinite);
-  if (Number.isFinite(latestRsi)) drawRsiMarker(context, latestRsi, rsiY(latestRsi), width, padding);
-
-  context.strokeStyle = "rgba(141,153,166,0.26)";
-  context.beginPath();
-  context.moveTo(padding.left, macdBottom + 12);
-  context.lineTo(width - padding.right, macdBottom + 12);
-  context.stroke();
-  context.fillStyle = "#8d99a6";
-  context.font = "10px ui-monospace, monospace";
-  context.fillText("MACD · 动能与趋势", padding.left, 13);
-  context.fillText("RSI 14 · 0–100 完整尺度", padding.left, rsiTop - 7);
-  drawRsiLegend(context, padding.left + 176, rsiTop - 7);
-  context.fillStyle = "rgba(255,94,115,0.58)";
-  context.fillText("OVERBOUGHT · 超买区", padding.left + 8, rsiY(85) + 3);
-  context.fillStyle = "rgba(83,216,251,0.64)";
-  context.fillText("OVERSOLD · 超卖区", padding.left + 8, rsiY(15) + 3);
-  drawIndicatorCrosshair(context, {
-    bars,
-    window: visibleWindow,
-    hover,
-    interval,
-    width,
-    height,
-    padding,
-    slot,
-    rsiValues,
-    line,
-    signal,
-    histogram,
-  });
-}
-
 function drawLastPriceLine(context, geometry) {
   const { width, padding, minPrice, maxPrice, yPrice, rightOffset, lastBar } = geometry;
   if (rightOffset !== 0 || !lastBar || lastBar.close < minPrice || lastBar.close > maxPrice) return;
@@ -303,7 +188,7 @@ function drawOhlcvTooltip(context, bar, x, y, canvasWidth) {
   context.restore();
 }
 
-function drawAxisLabel(context, text, x, y, background, canvasWidth) {
+export function drawAxisLabel(context, text, x, y, background, canvasWidth) {
   context.save();
   context.font = "10px ui-monospace, monospace";
   const width = Math.min(canvasWidth - x, context.measureText(text).width + 10);
@@ -316,7 +201,7 @@ function drawAxisLabel(context, text, x, y, background, canvasWidth) {
   context.restore();
 }
 
-function drawTimeLabel(context, text, centerX, y, canvasWidth) {
+export function drawTimeLabel(context, text, centerX, y, canvasWidth) {
   context.save();
   context.font = "10px ui-monospace, monospace";
   const width = context.measureText(text).width + 12;
@@ -349,105 +234,9 @@ function drawGrid(context, width, priceBottom, padding, minPrice, maxPrice, yPri
   context.stroke();
 }
 
-function drawRsiLegend(context, startX, baselineY) {
-  const items = [
-    { color: "#ff5e73", label: ">70 超买" },
-    { color: "#c7ff3d", label: "30–70 中性" },
-    { color: "#53d8fb", label: "<30 超卖" },
-  ];
-  let x = startX;
-  context.save();
-  context.font = "9px ui-monospace, monospace";
-  for (const item of items) {
-    context.fillStyle = item.color;
-    context.fillRect(x, baselineY - 6, 12, 2);
-    x += 17;
-    context.fillText(item.label, x, baselineY);
-    x += context.measureText(item.label).width + 18;
-  }
-  context.restore();
-}
-
-function drawRsiMarker(context, value, y, width, padding) {
-  const color = value >= 70 ? "#ff5e73" : value <= 30 ? "#53d8fb" : "#c7ff3d";
-  const text = value.toFixed(2);
-  const x = width - padding.right + 4;
-  context.save();
+export function drawSeries(context, values, x, y, color, lineWidth = 1.5) {
   context.strokeStyle = color;
-  context.globalAlpha = 0.55;
-  context.setLineDash([3, 4]);
-  context.beginPath();
-  context.moveTo(padding.left, y);
-  context.lineTo(width - padding.right, y);
-  context.stroke();
-  context.globalAlpha = 1;
-  context.font = "10px ui-monospace, monospace";
-  const markerWidth = Math.min(padding.right - 5, context.measureText(text).width + 10);
-  context.fillStyle = color;
-  context.fillRect(x, y - 9, markerWidth, 18);
-  context.fillStyle = "#090b0e";
-  context.fillText(text, x + 5, y + 3.5);
-  context.restore();
-}
-
-function drawThresholdSeries(context, values, x, y) {
-  const colors = { overbought: "#ff5e73", neutral: "#c7ff3d", oversold: "#53d8fb" };
-  context.save();
-  context.lineWidth = 2;
-  context.lineCap = "round";
-  context.lineJoin = "round";
-  for (const segment of splitThresholdSegments(values, 30, 70)) {
-    context.strokeStyle = colors[segment.zone];
-    context.beginPath();
-    context.moveTo(x(segment.from.index), y(segment.from.value));
-    context.lineTo(x(segment.to.index), y(segment.to.value));
-    context.stroke();
-  }
-  context.restore();
-}
-
-function drawIndicatorCrosshair(context, geometry) {
-  const { hover } = geometry;
-  if (!hover || hover.absoluteIndex < geometry.window.start || hover.absoluteIndex >= geometry.window.end) return;
-  const localIndex = hover.absoluteIndex - geometry.window.start;
-  const x = geometry.padding.left + geometry.slot * localIndex + geometry.slot / 2;
-  context.save();
-  context.strokeStyle = "rgba(205, 218, 228, 0.68)";
-  context.setLineDash([5, 5]);
-  context.beginPath();
-  context.moveTo(x, geometry.padding.top);
-  context.lineTo(x, geometry.height - geometry.padding.bottom);
-  context.stroke();
-  context.restore();
-
-  const text = [
-    `MACD ${formatIndicator(geometry.line[localIndex])}`,
-    `Signal ${formatIndicator(geometry.signal[localIndex])}`,
-    `Hist ${formatIndicator(geometry.histogram[localIndex])}`,
-    `RSI ${formatIndicator(geometry.rsiValues[localIndex])}`,
-  ].join("   ");
-  context.save();
-  context.font = "10px ui-monospace, monospace";
-  const tooltipWidth = Math.min(geometry.width - 16, context.measureText(text).width + 16);
-  context.fillStyle = "rgba(9, 11, 14, 0.88)";
-  context.strokeStyle = "rgba(83, 216, 251, 0.3)";
-  context.fillRect(geometry.padding.left, 20, tooltipWidth, 24);
-  context.strokeRect(geometry.padding.left, 20, tooltipWidth, 24);
-  context.fillStyle = "#d7e2ea";
-  context.fillText(text, geometry.padding.left + 8, 36);
-  context.restore();
-  drawTimeLabel(
-    context,
-    formatCrosshairTime(geometry.bars[localIndex].time, geometry.interval),
-    x,
-    geometry.height - 19,
-    geometry.width,
-  );
-}
-
-function drawSeries(context, values, x, y, color) {
-  context.strokeStyle = color;
-  context.lineWidth = 1.5;
+  context.lineWidth = lineWidth;
   context.beginPath();
   let started = false;
   let hasPoint = false;
@@ -467,9 +256,10 @@ function drawSeries(context, values, x, y, color) {
   if (hasPoint) context.stroke();
 }
 
-function prepareCanvas(canvas) {
+export function prepareCanvas(canvas) {
   const ratio = window.devicePixelRatio || 1;
-  const width = Math.max(300, canvas.clientWidth);
+  // 绘图和 pointer 几何都使用真实 CSS 宽度，窄屏时不能另设最小逻辑宽度。
+  const width = Math.max(1, canvas.clientWidth);
   const configuredHeight = Number(canvas.dataset.logicalHeight ?? 320);
   const cssHeight = Number.parseFloat(window.getComputedStyle(canvas).height);
   const height = Number.isFinite(cssHeight) && cssHeight > 0 ? cssHeight : configuredHeight;

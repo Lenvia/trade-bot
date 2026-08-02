@@ -1,0 +1,150 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content="Codex 数据实验室：实时市场数据与本地指标实验项目" />
+    <title>Codex 数据实验室</title>
+    <link rel="icon" href="data:," />
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <main class="page-shell">
+      <header class="hero">
+        <div>
+          <p class="eyebrow">MARKET DATA · NO TRADING</p>
+          <h1>Codex 数据实验室</h1>
+          <p class="hero-copy">观察 Bybit Public Market Data，并在浏览器本地组合和计算技术指标。</p>
+        </div>
+        <div class="connection-card">
+          <span id="statusDot" class="status-dot idle"></span>
+          <div><span class="small-label">连接状态</span><strong id="statusText">尚未连接</strong></div>
+        </div>
+      </header>
+
+      <section class="workspace-toolbar" aria-label="图表工具栏">
+        <div class="toolbar-group timeframe-control">
+          <span class="toolbar-label">TIMEFRAME</span>
+          <div class="timeframe-quick" role="group" aria-label="常用周期">
+            <button type="button" class="timeframe-button is-active" data-interval="15m" aria-pressed="true">15m</button>
+            <button type="button" class="timeframe-button" data-interval="1h" aria-pressed="false">1h</button>
+            <button type="button" class="timeframe-button" data-interval="4h" aria-pressed="false">4h</button>
+            <button type="button" class="timeframe-button" data-interval="1D" aria-pressed="false">1D</button>
+          </div>
+          <select id="intervalMenu" aria-label="更多周期">
+            <option value="" selected>更多周期</option>
+            <option value="1m">1 分钟</option>
+            <option value="5m">5 分钟</option>
+            <option value="30m">30 分钟</option>
+            <option value="2h">2 小时</option>
+            <option value="6h">6 小时</option>
+            <option value="12h">12 小时</option>
+          </select>
+        </div>
+
+        <details id="indicatorPicker" class="indicator-picker">
+          <summary>指标 <span id="activeIndicatorCount" class="selection-count">2</span></summary>
+          <div id="indicatorOptions" class="indicator-options"></div>
+        </details>
+
+        <label class="compact-select">
+          <span>历史 K 线</span>
+          <select id="rowsSelect">
+            <option value="100">100 根</option>
+            <option value="200" selected>200 根</option>
+            <option value="500">500 根</option>
+          </select>
+        </label>
+        <button id="connectButton" class="primary-button">重新连接</button>
+        <button id="refreshButton" class="secondary-button" disabled>刷新历史</button>
+      </section>
+
+      <section class="stream-strip" aria-label="实时数据状态" aria-live="polite">
+        <div class="stream-primary"><span id="streamBadge" class="stream-badge idle">OFFLINE</span><strong id="lastTradeAge">等待连接</strong></div>
+        <div id="routeStatus" class="route-status" title="正在检查系统代理">
+          <span>NETWORK ROUTE</span>
+          <div><i id="routeBadge" class="route-badge checking" aria-hidden="true">…</i><strong id="routeText">检查中</strong></div>
+        </div>
+        <div><span>TRANSPORT DELAY</span><strong id="transportDelay">—</strong></div>
+        <div><span>HISTORY RECONCILE</span><strong id="historySyncStatus">等待首次加载</strong></div>
+        <div class="readout-mode"><span>OHLCV READOUT</span><strong id="metricReadMode">LIVE · 最新 K 线</strong></div>
+      </section>
+
+      <section class="metric-grid" aria-label="最新 K 线">
+        <article><span>OPEN</span><strong id="openValue">—</strong></article>
+        <article><span>HIGH</span><strong id="highValue">—</strong></article>
+        <article><span>LOW</span><strong id="lowValue">—</strong></article>
+        <article><span>CLOSE</span><strong id="closeValue">—</strong></article>
+        <article><span>VOLUME</span><strong id="volumeValue">—</strong></article>
+        <article><span>BAR TIME</span><strong id="barTimeValue">—</strong></article>
+      </section>
+
+      <div class="workspace-grid">
+        <section class="panel chart-panel">
+          <div class="panel-heading">
+            <div><span class="section-index">01</span><h2 id="chartTitle">BNBUSDT · 15m</h2></div>
+            <div class="chart-heading-tools">
+              <span id="visibleRangeLabel" class="range-label">最近 120 根</span>
+              <div class="chart-actions" role="group" aria-label="图表缩放控制">
+                <button id="zoomOutButton" class="chart-tool-button" type="button" aria-label="缩小图表">−</button>
+                <button id="zoomInButton" class="chart-tool-button" type="button" aria-label="放大图表">＋</button>
+                <button id="resetViewButton" class="chart-reset-button" type="button">适应视图</button>
+              </div>
+            </div>
+          </div>
+          <canvas id="priceCanvas" class="chart-canvas" data-logical-height="500" height="500" aria-label="K 线与成交量图表"></canvas>
+
+          <div class="indicator-stack-heading">
+            <div><span class="section-index">02</span><h2>指标窗格</h2></div>
+            <span>共享时间轴 · 独立纵轴</span>
+          </div>
+          <div id="indicatorPanes" class="indicator-panes"></div>
+          <div id="indicatorEmpty" class="indicator-empty" hidden>未选择指标。可从顶部“指标”菜单添加。</div>
+          <p class="chart-gesture-hint">移动：Crosshair · 滚轮：缩放 · 按住拖动：平移 · 双击：恢复最新</p>
+          <div id="emptyState" class="empty-state">正在连接并读取历史数据…</div>
+        </section>
+
+        <aside class="panel watchlist-panel" aria-label="观察列表">
+          <div class="watchlist-heading"><div><span class="section-index">WATCH</span><h2>观察列表</h2></div><span>Bybit 永续</span></div>
+          <div class="watchlist" role="listbox" aria-label="选择市场">
+            <button type="button" role="option" class="watchlist-item is-active" data-symbol="BYBIT:FUTURE:BNBUSDT" aria-selected="true">
+              <span><strong>BNB</strong><small>BNBUSDT</small></span><em>PERP</em>
+            </button>
+            <button type="button" role="option" class="watchlist-item" data-symbol="BYBIT:FUTURE:BTCUSDT" aria-selected="false">
+              <span><strong>BTC</strong><small>BTCUSDT</small></span><em>PERP</em>
+            </button>
+            <button type="button" role="option" class="watchlist-item" data-symbol="BYBIT:FUTURE:ETHUSDT" aria-selected="false">
+              <span><strong>ETH</strong><small>ETHUSDT</small></span><em>PERP</em>
+            </button>
+          </div>
+          <p class="watchlist-note">这里固定用于快速切换市场，不维护收藏状态，也不会为未选中的品种建立订阅。</p>
+        </aside>
+      </div>
+
+      <section class="panel tape-panel standalone-panel">
+        <div class="panel-heading compact">
+          <div><span class="section-index">03</span><h2>实时逐笔成交</h2></div>
+          <span id="tradeCount" class="counter">0 trades</span>
+        </div>
+        <div class="table-wrap">
+          <table><thead><tr><th>时间</th><th>方向</th><th>价格</th><th>数量</th></tr></thead>
+            <tbody id="tradeTableBody"><tr><td colspan="4" class="placeholder-row">等待实时成交…</td></tr></tbody>
+          </table>
+        </div>
+      </section>
+
+      <details class="panel debug-panel">
+        <summary>连接诊断与日志 <span id="diagnosticSummary" class="diagnostic-summary idle">OFFLINE</span></summary>
+        <div class="diagnostic-grid" aria-label="连接诊断">
+          <article><span>BYBIT WEBSOCKET</span><strong id="diagnosticWs">OFFLINE · 等待连接</strong></article>
+          <article><span>BYBIT REST HISTORY</span><strong id="diagnosticHistory">等待首次加载</strong></article>
+          <article><span>SYSTEM NETWORK ROUTE</span><strong id="diagnosticRoute">检查中</strong></article>
+          <article><span>LAST HISTORY ERROR</span><strong id="diagnosticLastError">无</strong></article>
+        </div>
+        <pre id="debugLog">尚无日志。</pre>
+      </details>
+      <footer><span>只读行情，仅供学习与技术验证，不构成投资建议。</span><a href="https://bybit-exchange.github.io/docs/v5/ws/connect" target="_blank" rel="noreferrer">Bybit Public WebSocket 文档 ↗</a></footer>
+    </main>
+    <script type="module" src="/src/client/app.mjs"></script>
+  </body>
+</html>

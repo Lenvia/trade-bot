@@ -8,7 +8,7 @@ import {
   createCanonicalTrade,
   normalizeMarketSelection,
   parseProductId,
-} from "../market-data-contract.mjs";
+} from "../../../src/client/market/contract.mjs";
 
 test("canonical product ids and selections are provider-independent", () => {
   assert.equal(MARKET_DATA_CONTRACT_VERSION, 1);
@@ -27,6 +27,11 @@ test("canonical product ids and selections are provider-independent", () => {
     interval: "15m",
     rows: 200,
   });
+  assert.equal(normalizeMarketSelection({
+    symbol: "BYBIT:FUTURE:BNBUSDT",
+    interval: "4h",
+    rows: 200,
+  }).interval, "4h");
 });
 
 test("canonical bars enforce OHLCV invariants", () => {

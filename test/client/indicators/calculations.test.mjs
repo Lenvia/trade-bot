@@ -6,7 +6,7 @@ import {
   macd,
   rsi,
   splitThresholdSegments,
-} from "../indicators.mjs";
+} from "../../../src/client/indicators/calculations.mjs";
 
 test("EMA of a constant series stays constant after the seed", () => {
   const result = ema(Array(12).fill(42), 5);

@@ -5,7 +5,7 @@ import {
   GoChartingDemoSource,
   normalizeBar,
   normalizeTrades,
-} from "../data-sources/gocharting-demo.mjs";
+} from "../../../../src/client/market/sources/gocharting-demo.mjs";
 
 const selection = {
   symbol: "BYBIT:FUTURE:BTCUSDT",

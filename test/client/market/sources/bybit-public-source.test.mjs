@@ -7,7 +7,7 @@ import {
   bybitSymbol,
   normalizeBybitBar,
   normalizeBybitTrades,
-} from "../data-sources/bybit-public.mjs";
+} from "../../../../src/client/market/sources/bybit-public.mjs";
 
 const selection = {
   symbol: "BYBIT:FUTURE:BNBUSDT",
@@ -18,6 +18,7 @@ const selection = {
 test("Bybit symbols, intervals, bars, and trades normalize behind the source boundary", () => {
   assert.equal(bybitSymbol(selection.symbol), "BNBUSDT");
   assert.equal(bybitInterval("15m"), "15");
+  assert.equal(bybitInterval("4h"), "240");
   assert.deepEqual(normalizeBybitBar(["1000", "577", "580", "575", "579", "12.5"]), {
     time: 1000,
     open: 577,
@@ -97,6 +98,60 @@ test("a provider error releases the history request for a later refresh", async 
   source.disconnect();
 });
 
+test("failed initial history retries with backoff without reconnecting the websocket", async () => {
+  const scheduler = new FakeScheduler();
+  const retries = [];
+  const histories = [];
+  let fetchCount = 0;
+  const source = new BybitPublicSource({
+    WebSocketImpl: FakeWebSocket,
+    scheduler,
+    now: () => scheduler.now,
+    random: () => 0.5,
+    fetchImpl: async () => {
+      fetchCount += 1;
+      if (fetchCount === 1) throw new TypeError("Failed to fetch");
+      return response({ retCode: 0, retMsg: "OK", result: { list: [] } });
+    },
+    callbacks: {
+      onHistoryRetry: (retry) => retries.push(retry),
+      onHistory: (history) => histories.push(history),
+    },
+  });
+
+  source.connect(selection);
+  FakeWebSocket.instances.at(-1).open();
+  await flushPromises();
+
+  assert.equal(retries.length, 1);
+  assert.equal(retries[0].attempt, 1);
+  assert.equal(retries[0].delay, 2_000);
+  assert.equal(FakeWebSocket.instances.length > 0, true);
+
+  scheduler.runNextTimeout();
+  await flushPromises();
+  assert.equal(fetchCount, 2);
+  assert.equal(histories.length, 1);
+  source.disconnect();
+});
+
+test("transport activity reports pong frames even when no trade arrives", async () => {
+  const activity = [];
+  const source = new BybitPublicSource({
+    WebSocketImpl: FakeWebSocket,
+    fetchImpl: async () => response({ retCode: 0, retMsg: "OK", result: { list: [] } }),
+    callbacks: { onTransportActivity: (event) => activity.push(event.kind) },
+  });
+
+  source.connect(selection);
+  const socket = FakeWebSocket.instances.at(-1);
+  socket.open();
+  await flushPromises();
+  socket.message(JSON.stringify({ op: "pong" }));
+  assert.deepEqual(activity, ["open", "pong"]);
+  source.disconnect();
+});
+
 function response(payload, { ok = true, status = 200 } = {}) {
   return { ok, status, json: async () => payload };
 }
@@ -148,5 +203,41 @@ class FakeWebSocket {
   close(code = 1000, reason = "") {
     this.readyState = FakeWebSocket.CLOSED;
     this.dispatch("close", { code, reason });
+  }
+}
+
+class FakeScheduler {
+  constructor() {
+    this.now = 0;
+    this.nextId = 1;
+    this.timeouts = new Map();
+    this.intervals = new Map();
+  }
+
+  setTimeout(callback, delay) {
+    const id = this.nextId++;
+    this.timeouts.set(id, { callback, delay });
+    return id;
+  }
+
+  clearTimeout(id) {
+    this.timeouts.delete(id);
+  }
+
+  setInterval(callback, delay) {
+    const id = this.nextId++;
+    this.intervals.set(id, { callback, delay });
+    return id;
+  }
+
+  clearInterval(id) {
+    this.intervals.delete(id);
+  }
+
+  runNextTimeout() {
+    const [id, task] = [...this.timeouts.entries()].sort((left, right) => left[1].delay - right[1].delay)[0];
+    this.timeouts.delete(id);
+    this.now += task.delay;
+    task.callback();
   }
 }

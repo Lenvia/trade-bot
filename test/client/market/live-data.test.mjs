@@ -7,9 +7,10 @@ import {
   mergeHistoryWithLive,
   reconcileHistoryWithTrades,
   replayTradesOnBars,
-} from "../live-data.mjs";
+} from "../../../src/client/market/live-data.mjs";
 
 const FIVE_MINUTES = 5 * 60 * 1000;
+const FOUR_HOURS = 4 * 60 * 60 * 1000;
 
 test("a live trade updates the current 5-minute candle", () => {
   const start = Date.UTC(2026, 7, 1, 8, 0);
@@ -53,6 +54,19 @@ test("a trade after the boundary creates the next 5-minute candle", () => {
     volume: 0.25,
     lastTradeTime: start + FIVE_MINUTES + 1000,
   });
+});
+
+test("4-hour trades remain in the same canonical bucket until the boundary", () => {
+  const start = Date.UTC(2026, 7, 1, 8, 0);
+  const bars = [{ time: start, open: 100, high: 100, low: 100, close: 100, volume: 1 }];
+
+  const within = applyTradeToBars(bars, { time: start + FOUR_HOURS - 1, price: 103, size: 2 }, FOUR_HOURS);
+  const next = applyTradeToBars(bars, { time: start + FOUR_HOURS, price: 104, size: 1 }, FOUR_HOURS);
+
+  assert.deepEqual(within, { updated: true, created: false });
+  assert.deepEqual(next, { updated: true, created: true });
+  assert.equal(bars[0].close, 103);
+  assert.equal(bars[1].time, start + FOUR_HOURS);
 });
 
 test("the first live trade can seed an empty series while history is loading", () => {
